@@ -2,7 +2,7 @@
   "name": "box-checker-api",
   "version": "2.0.0",
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   },
   "dependencies": {
     "@teachablemachine/image": "^0.8.5",
