@@ -2,22 +2,33 @@ const express = require('express');
 const multer = require('multer');
 const { Canvas, Image, loadImage } = require('canvas');
 
-// --- 1. ROBUST POLYFILLS ---
+// =========================================================
+// 1. THE BROWSER SIMULATOR (Fixes all "not defined" errors)
+// =========================================================
 global.window = global;
+
+// FIX FOR THE ERROR YOU JUST SAW:
+// We define a dummy class so the library's "instanceof" check works
+global.HTMLVideoElement = class {}; 
+
+// Other required browser globals
+global.HTMLImageElement = Image;
+global.HTMLCanvasElement = Canvas;
+global.HTMLElement = class {}; // Generic element mock
+
+// Mock Document (The library asks this to create elements)
 global.document = {
     createElement: (tag) => {
         if (tag === 'canvas') return new Canvas(224, 224);
         if (tag === 'img') return new Image();
-        return { style: {} }; // Dummy object for other tags
+        return { style: {} };
     },
     body: { appendChild: () => {} }
 };
-global.HTMLCanvasElement = Canvas;
-global.HTMLImageElement = Image;
-global.HTMLElement = Object; // Generic element
-global.Image = Image; // Important alias
+// =========================================================
 
-// --- 2. LOAD LIBRARIES ---
+
+// 2. LOAD LIBRARIES (Must happen AFTER the section above)
 const tf = require('@tensorflow/tfjs');
 const tmImage = require('@teachablemachine/image');
 
@@ -31,7 +42,6 @@ let model;
 async function loadModel() {
     if (model) return model;
     console.log("Loading model...");
-    // Force the model to load without trying to use browser-specific APIs
     model = await tmImage.load(URL + "model.json", URL + "metadata.json");
     return model;
 }
@@ -42,30 +52,22 @@ app.post('/api/check', upload.single('image'), async (req, res) => {
 
         // 1. Load the Image
         const image = await loadImage(req.file.buffer);
-        
-        // DEBUG: Check if image loaded correctly
-        if (!image.width || image.width === 0) {
-            throw new Error("Image loaded but has 0 width. File might be corrupt.");
-        }
 
-        // 2. MANUAL PRE-PROCESSING (The Fix for IndexSizeError)
-        // We crop/resize it ourselves to 224x224 so tmImage doesn't have to calculate it
+        // 2. MANUAL CROP (To 224x224)
+        // We do this manually to avoid the library trying to resize it (which causes errors)
         const canvas = new Canvas(224, 224);
         const ctx = canvas.getContext('2d');
         
-        // Simple "Cover" fit (Center Crop)
+        // Center Crop logic
         const minSize = Math.min(image.width, image.height);
         const startX = (image.width - minSize) / 2;
         const startY = (image.height - minSize) / 2;
-        
-        // Draw the center square of the image into our 224x224 canvas
         ctx.drawImage(image, startX, startY, minSize, minSize, 0, 0, 224, 224);
 
-        // 3. Load Model & Predict
+        // 3. Predict
         const loadedModel = await loadModel();
         
-        // Pass the ALREADY RESIZED canvas. 
-        // We use 'predict' which expects a clean input.
+        // Pass the canvas directly. The library sees it's a Canvas and skips the Video check.
         const prediction = await loadedModel.predict(canvas);
 
         // 4. Results
@@ -82,11 +84,7 @@ app.post('/api/check', upload.single('image'), async (req, res) => {
         res.json({
             status: status,
             confidence: (highestScore * 100).toFixed(2),
-            is_damaged: status.toLowerCase().includes("damaged"),
-            debug_info: {
-                original_width: image.width,
-                original_height: image.height
-            }
+            is_damaged: status.toLowerCase().includes("damaged")
         });
 
     } catch (error) {
@@ -99,7 +97,6 @@ app.post('/api/check', upload.single('image'), async (req, res) => {
     }
 });
 
-// Health Check
-app.get('/', (req, res) => res.send("✅ API is Online"));
+app.get('/', (req, res) => res.send("✅ Box API is Online"));
 
 module.exports = app;
